@@ -24,6 +24,7 @@ struct v3
 static inline v3 v3_sub(v3 a, v3 b) { return {a.x - b.x, a.y - b.y, a.z - b.z}; }
 static inline v3 v3_add(v3 a, v3 b) { return {a.x + b.x, a.y + b.y, a.z + b.z}; }
 static inline v3 v3_mul(v3 a, float s) { return {a.x * s, a.y * s, a.z * s}; }
+static inline v3 v3_lerp(v3 a, v3 b, float t) { return v3_add(v3_mul(a, 1.0f - t), v3_mul(b, t)); }
 static inline float v3_dot(v3 a, v3 b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
 static inline float v3_len(v3 a) { return sqrtf(v3_dot(a, a)); }
 
@@ -48,50 +49,6 @@ static inline void setRow(bMatrix4& m, int r, v3 v)
     m.m[r][0] = v.x;
     m.m[r][1] = v.y;
     m.m[r][2] = v.z;
-}
-
-// ---------------- yaw around LOCAL up (same as your working hook) ----------------
-static void ApplyYaw_LocalUp_RowMajor(bMatrix4& m, float yaw)
-{
-    float s = sinf(yaw);
-    float c = cosf(yaw);
-
-    v3 r = v3_norm(getRow(m, 0)); // Right
-    v3 f = v3_norm(getRow(m, 1)); // Forward
-    v3 u = v3_norm(getRow(m, 2)); // Up
-
-    v3 r2 = v3_add(v3_mul(r, c), v3_mul(f, s));
-    v3 f2 = v3_add(v3_mul(f, c), v3_mul(r, -s));
-
-    setRow(m, 0, v3_norm(r2));
-    setRow(m, 1, v3_norm(f2));
-    setRow(m, 2, u); // unchanged
-    // row3 untouched
-}
-
-static void ApplyRoll_ViewSpace_RowMajor(bMatrix4& m, float roll)
-{
-    float s = sinf(roll);
-    float c = cosf(roll);
-
-    v3 r = v3_norm(getRow(m, 0)); // Right
-    v3 f = v3_norm(getRow(m, 1)); // Forward (AXIS!)
-    v3 u = v3_norm(getRow(m, 2)); // Up
-
-    // Rodrigues rotation around Forward
-    v3 r2 = v3_add(
-        v3_mul(r, c),
-        v3_add(
-            v3_mul(v3_cross(f, r), s),
-            v3_mul(f, v3_dot(f, r) * (1.0f - c))
-        )
-    );
-
-    v3 u2 = v3_cross(r2, f); // re-derive up to keep orthonormal
-
-    setRow(m, 0, v3_norm(r2));
-    setRow(m, 2, v3_norm(u2));
-    // Forward stays EXACTLY the same
 }
 
 
@@ -176,6 +133,11 @@ struct CamState
     v3 prevVelDir{}; // normalized horizontal velocity dir
     v3 prevPosReset{};
 
+    v3 velDirFilt{}; // filtered horizontal velocity direction (MOST important)
+    float speedFilt = 0.0f;
+    float yawRateFilt = 0.0f;
+    float horizonLock = 1.0f;   // 1 = locked to horizon, 0 = free bank
+
     // outputs
     float yawRateRaw = 0.0f; // rad/s (raw, no deadzone)
     float yawBias = 0.0f; // radians (look-into-turn)
@@ -187,6 +149,68 @@ struct CamState
     float cachedRoll = 0.0f;
     float cachedLateral = 0.0f;
 } g_cam;
+
+// ---------------- yaw around LOCAL up (same as your working hook) ----------------
+static void ApplyYaw_LocalUp_RowMajor(bMatrix4& m, float yaw)
+{
+    float s = sinf(yaw);
+    float c = cosf(yaw);
+
+    v3 r = v3_norm(getRow(m, 0)); // Right
+    v3 f = v3_norm(getRow(m, 1)); // Forward
+    v3 u = v3_norm(getRow(m, 2)); // Up
+
+    v3 r2 = v3_add(v3_mul(r, c), v3_mul(f, s));
+    v3 f2 = v3_add(v3_mul(f, c), v3_mul(r, -s));
+
+    setRow(m, 0, v3_norm(r2));
+    setRow(m, 1, v3_norm(f2));
+    setRow(m, 2, u); // unchanged
+    // row3 untouched
+}
+
+static void ApplyRoll_Horizon_UG2(bMatrix4& m, float roll)
+{
+    const v3 worldUp = { 0.0f, -1.0f, 0.0f };
+
+    // Roll axis (camera forward after yaw)
+    v3 f = v3_norm(getRow(m, 1));
+
+    // Camera up (incoming)
+    v3 camUp = v3_norm(getRow(m, 2));
+
+    // Gravity-projected up (true horizon)
+    v3 gravUp = v3_sub(worldUp, v3_mul(f, v3_dot(worldUp, f)));
+    gravUp = v3_norm(gravUp);
+
+    // ---- UG2 horizon bias (THIS is the key) ----
+    float h = clampf(g_cam.horizonLock, 0.0f, 1.0f);
+
+    v3 u0 = v3_norm(
+        v3_add(
+            v3_mul(camUp, 1.0f - h),
+            v3_mul(gravUp, h)
+        )
+    );
+
+    // Roll around forward
+    float s = sinf(roll);
+    float c = cosf(roll);
+
+    v3 u = v3_add(
+        v3_mul(u0, c),
+        v3_mul(v3_cross(f, u0), s)
+    );
+    u = v3_norm(u);
+
+    // ---- Correct orthonormal rebuild (critical) ----
+    v3 r  = v3_norm(v3_cross(u, f));   // RIGHT
+    v3 f2 = v3_norm(v3_cross(r, u));   // FORWARD
+
+    setRow(m, 0, r);
+    setRow(m, 1, f2);
+    setRow(m, 2, u);
+}
 
 // ---------------- compute from VELOCITY (UG2-style) ----------------
 static void ComputeUG2Like(float dt, const v3& posNow)
@@ -213,6 +237,22 @@ static void ComputeUG2Like(float dt, const v3& posNow)
 
     vdir = v3_norm(vdir);
 
+    // ---------------------------------------------
+    // UG2-style velocity filtering
+    // ---------------------------------------------
+    float velResp = 1.0f - expf(-6.0f * dt); // UG2-ish inertia
+
+    // direction (critical)
+    g_cam.velDirFilt = v3_norm(
+        v3_add(
+            v3_mul(g_cam.velDirFilt, 1.0f - velResp),
+            v3_mul(vdir, velResp)
+        )
+    );
+
+    // speed
+    g_cam.speedFilt += (speedU - g_cam.speedFilt) * velResp;
+
     // yaw rate from change in horizontal velocity direction
     // signed angle rate around world Y: cross(prev,cur).y / dt
     v3 prev = g_cam.prevVelDir;
@@ -222,11 +262,36 @@ static void ComputeUG2Like(float dt, const v3& posNow)
     float yawRateRaw = yawS / dt; // rad/s (small-angle)
     g_cam.prevVelDir = vdir;
 
-    g_cam.yawRateRaw = yawRateRaw;
+    float yawResp = 1.0f - expf(-8.0f * dt);
+    g_cam.yawRateFilt += (yawRateRaw - g_cam.yawRateFilt) * yawResp;
+    g_cam.yawRateRaw = g_cam.yawRateFilt;
 
     // ---- deadzone only for VISUAL yaw, not for load ----
     const float kYawDeadzone = 0.02f; // rad/s
     float yawRateFiltered = (fabsf(yawRateRaw) < kYawDeadzone) ? 0.0f : yawRateRaw;
+
+    // ------------------------------------------------------------
+    // Horizon lock strength (UG2 behavior)
+    // ------------------------------------------------------------
+
+    // yaw intensity (filtered!)
+    float yaw01 = clampf(fabsf(g_cam.yawRateRaw) / 0.6f, 0.0f, 1.0f);
+
+    // speed must already be filtered earlier (speedFilt)
+    float speed01 = clampf(g_cam.speedFilt / 45.0f, 0.0f, 1.0f);
+
+    // horizon strongly locked when:
+    //  - low speed
+    //  - small yaw
+    float targetLock =
+        1.0f - (0.65f * yaw01 + 0.35f * speed01);
+
+    // smooth horizon behavior (UG2 feel)
+    float lockResp = (targetLock > g_cam.horizonLock) ? 8.0f : 3.0f;
+    float aLock = 1.0f - expf(-lockResp * dt);
+
+    g_cam.horizonLock += (targetLock - g_cam.horizonLock) * aLock;
+    g_cam.horizonLock = clampf(g_cam.horizonLock, 0.0f, 1.0f);
 
     // ---- lateral load proxy (UG2 feel) ----
     // proportional to |yawRate| * speed
@@ -250,21 +315,30 @@ static void ComputeUG2Like(float dt, const v3& posNow)
     float aYaw = 1.0f - expf(-kRespYaw * dt);
     g_cam.yawBias += (yawTarget - g_cam.yawBias) * aYaw;
 
-    // ---- roll bank from load (UG2 part) ----
+    // ---- roll bank intent from load (UG2-style scalar) ----
     const float kMaxRoll = 0.45f;
 
     float rollTarget =
         signf(yawRateRaw) *
-        (0.25f * g_cam.gNorm + 0.75f * powf(g_cam.gNorm, 1.5f)) *
+        (0.35f * g_cam.gNorm + 0.65f * powf(g_cam.gNorm, 1.4f)) *
         kMaxRoll;
 
-    // suppress roll at very low speed
+    // suppress roll intent at very low speed
     float speedFade = clampf(speedU / 18.0f, 0.0f, 1.0f);
     rollTarget *= speedFade;
 
-    // asym response
-    float resp = (fabsf(rollTarget) < fabsf(g_cam.rollBias)) ? 9.0f : 4.0f;
-    float aRoll = 1.0f - expf(-resp * dt);
+    // perceptual minimum (motion-based only!)
+    if (g_cam.gNorm > 0.05f && speedFade > 0.25f)
+    {
+        float minRoll = 0.006f; // ~0.35°
+        if (fabsf(rollTarget) < minRoll)
+            rollTarget = signf(rollTarget) * minRoll;
+    }
+
+    // asym response (lean in slow, snap back fast)
+    float rollResp = (fabsf(rollTarget) < fabsf(g_cam.rollBias)) ? 9.0f : 4.0f;
+    float aRoll = 1.0f - expf(-rollResp * dt);
+
     g_cam.rollBias += (rollTarget - g_cam.rollBias) * aRoll;
 }
 
@@ -298,13 +372,13 @@ static void __fastcall hkSetCameraMatrix(void* cam, void*, const bMatrix4* m, fl
     // ------------------------------------------------------------
     // Time
     // ------------------------------------------------------------
-    if (!Sim_GetTime)
-    {
-        oSetCameraMatrix(cam, &mm, fov);
-        return;
-    }
+    // if (!Sim_GetTime)
+    // {
+    //     oSetCameraMatrix(cam, &mm, fov);
+    //     return;
+    // }
 
-    float t = Sim_GetTime();
+    float t = GetTimeSeconds_Safe();
 
     // ------------------------------------------------------------
     // First-time init
@@ -318,6 +392,11 @@ static void __fastcall hkSetCameraMatrix(void* cam, void*, const bMatrix4* m, fl
         g_cam.prevPos = pos;
         g_cam.prevPosReset = pos;
         g_cam.prevVelDir = v3{1, 0, 0};
+
+        g_cam.velDirFilt = v3{1, 0, 0};
+        g_cam.speedFilt = 0.0f;
+        g_cam.yawRateFilt = 0.0f;
+        g_cam.horizonLock = 1.0f;
 
         g_cam.yawRateRaw = 0.0f;
         g_cam.yawBias = 0.0f;
@@ -410,7 +489,26 @@ static void __fastcall hkSetCameraMatrix(void* cam, void*, const bMatrix4* m, fl
         ApplyYaw_LocalUp_RowMajor(live, yaw);
 
     if (fabsf(roll) > 1e-6f)
-        ApplyRoll_ViewSpace_RowMajor(live, roll);
+    {
+        // const v3 worldUp = {0.0f, -1.0f, 0.0f};
+        //
+        // v3 fwd = v3_norm(getRow(live, 1));
+        // float pitchFade = 1.0f - fabsf(v3_dot(fwd, worldUp));
+        // pitchFade = clampf(pitchFade, 0.0f, 1.0f);
+        //
+        // float speed01 = clampf(g_cam.speedFilt / 40.0f, 0.0f, 1.0f);
+        //
+        // float horizonGain =
+        //     1.0f +
+        //     (0.8f + 0.2f * speed01) * (1.0f - pitchFade);
+        //
+        // roll *= clampf(horizonGain, 1.0f, 1.75f);
+        //
+        // float effectiveRoll = roll * (1.0f - g_cam.horizonLock);
+        // ApplyRoll_Horizon_UG2(live, effectiveRoll);
+        
+        ApplyRoll_Horizon_UG2(live, roll);
+    }
 
     // ------------------------------------------------------------
     // PASS MODIFIED MATRIX INTO ENGINE
