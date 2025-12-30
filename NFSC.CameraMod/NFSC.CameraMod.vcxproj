@@ -96,6 +96,8 @@
         <ClInclude Include="..\includes\minhook\src\hde\table32.h"/>
         <ClInclude Include="..\includes\minhook\src\hde\table64.h"/>
         <ClInclude Include="..\includes\minhook\src\trampoline.h"/>
+        <ClInclude Include="Carbon.h" />
+        <ClInclude Include="MostWanted.h" />
     </ItemGroup>
     <ItemGroup>
         <ClCompile Include="..\includes\minhook\src\buffer.c"/>
@@ -104,6 +106,7 @@
         <ClCompile Include="..\includes\minhook\src\hook.c"/>
         <ClCompile Include="..\includes\minhook\src\trampoline.c"/>
         <ClCompile Include="dllmain.cpp"/>
+        <ClCompile Include="Game.h" />
     </ItemGroup>
     <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets"/>
 </Project>
