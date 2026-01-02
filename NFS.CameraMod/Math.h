@@ -308,3 +308,16 @@ static inline bool IsFiniteFloat(float x)
 {
     return (x == x) && (x > -3.4e38f) && (x < 3.4e38f); // simple NaN/Inf-ish filter
 }
+
+static inline bool isfinite3(const Vec3& v)
+{
+    return _finite(v.x) && _finite(v.y) && _finite(v.z);
+}
+
+static inline Vec3 safe_norm(const Vec3& v, const Vec3& fallback, float eps = 1e-6f)
+{
+    float l = len(v);
+    if (!(l > eps) || !_finite(l)) return fallback;
+    Vec3 n = mul(v, 1.0f / l);
+    return isfinite3(n) ? n : fallback;
+}
