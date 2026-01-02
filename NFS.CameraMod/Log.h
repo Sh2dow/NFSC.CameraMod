@@ -64,13 +64,9 @@ namespace asi_log
     // Helper macro-style function for easier usage
     inline void Log(const char* fmt, ...)
     {
-        char buffer[2048];
-
         va_list args;
         va_start(args, fmt);
-        vsnprintf_s(buffer, sizeof(buffer), fmt, args);
+        logger.log(fmt, args); // if you refactor logger to accept va_list
         va_end(args);
-
-        logger.log("%s", buffer);
     }
 }

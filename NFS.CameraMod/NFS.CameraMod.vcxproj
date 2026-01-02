@@ -68,6 +68,7 @@
         <PostBuildEvent>
             <Command>
                 XCOPY /Y /R "$(TargetPath)" "d:\Games\NFS MW - Vanilla\SCRIPTS\"
+<!--                XCOPY /Y /R "$(TargetPath)" "d:\Games\NFSC - Rework11\Scripts\"-->
             </Command>
         </PostBuildEvent>
     </ItemDefinitionGroup>
@@ -130,6 +131,7 @@
 
         <Link>
             <SubSystem>Windows</SubSystem>
+            <OutputFile>$(OutDir)$(TargetName)$(TargetExt)</OutputFile>
             <AdditionalLibraryDirectories>
                 $(DXSDK_DIR)Lib\x86;
                 %(AdditionalLibraryDirectories)
@@ -225,6 +227,7 @@
         <ClCompile Include="..\includes\minhook\src\trampoline.c"/>
         <ClCompile Include="dllmain.cpp"/>
         <ClCompile Include="Game.h"/>
+        <ClCompile Include="Math.h" />
     </ItemGroup>
 
     <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets"/>
