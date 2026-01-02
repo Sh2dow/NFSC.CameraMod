@@ -69,6 +69,11 @@ static inline float signf(float v)
 
 static inline float clampf(float v, float lo, float hi) { return v < lo ? lo : (v > hi ? hi : v); }
 
+inline float saturate(float x)
+{
+    return clampf(x, 0.0f, 1.0f);
+}
+
 static Mat4 Mul(const Mat4& A, const Mat4& B)
 {
     Mat4 R = {};
@@ -86,6 +91,13 @@ static Mat4 Mul(const Mat4& A, const Mat4& B)
     }
 
     return R;
+}
+
+static inline Vec3 Normalize(const Vec3& v)
+{
+    float len = std::sqrt(dot(v, v));
+    if (len < 1e-6f) return {0,0,0};
+    return { v.x/len, v.y/len, v.z/len };
 }
 
 static void Normalize3(float& x, float& y, float& z)

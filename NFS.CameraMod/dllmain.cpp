@@ -8,304 +8,364 @@
 #include "Log.h"
 #include "minhook/include/MinHook.h"
 #include <d3d9.h>
-#include "minhook/include/MinHook.h"
 
-static inline void Orthonormalize(Vec3& r, Vec3& u, Vec3& f)
+// ==========================================================
+// GLOBAL STRUCTS
+// ==========================================================
+// Set by wrapper hook, consumed by look-at hook
+static volatile LONG gApplyUG2Flag = 0;
+
+constexpr float PI = 3.14159265358979323846f;
+
+using CubicUpdate_t = int(__thiscall*)(void* self, float dt);
+using CreateLookAt_t = void(__cdecl*)(Mat4* mat, Vec3* eye, Vec3* center, Vec3* up);
+
+static CubicUpdate_t  oCubicUpdate  = nullptr;
+static CreateLookAt_t oCreateLookAt = nullptr;
+
+// ==========================================================
+// TIME
+// ==========================================================
+using Sim_GetTime_t = float(__cdecl*)();
+static Sim_GetTime_t Sim_GetTime = (Sim_GetTime_t)Game::SimGetTimeAddr; // verify in IDA
+
+static float GetTimeSeconds_Safe()
 {
-    f = norm(f);
-    r = norm(cross(u, f));     // right = up x forward
-    u = cross(f, r);           // up   = forward x right
-}
+    static bool qpcInit = false;
+    static LARGE_INTEGER freq{};
+    static LARGE_INTEGER t0{};
 
-// Extract camera basis from a D3D view matrix.
-// NOTE: This assumes the matrix you see in SetTransform is a standard view matrix layout used by D3D9.
-// We’ll treat rows as basis vectors (common in many engines); if it feels inverted, flip signs below.
-static inline void ExtractBasisFromView(const D3DMATRIX& m, Vec3& right, Vec3& up, Vec3& fwd)
-{
-    // Row-major basis from view:
-    right = v3(m._11, m._12, m._13);
-    up    = v3(m._21, m._22, m._23);
-    fwd   = v3(m._31, m._32, m._33);
-    Orthonormalize(right, up, fwd);
-}
-
-// Apply roll around forward axis: rotate right/up around fwd by angle
-static inline void ApplyRollToView(D3DMATRIX& m, float rollRad)
-{
-    Vec3 r,u,f;
-    ExtractBasisFromView(m, r,u,f);
-
-    float c = std::cos(rollRad);
-    float s = std::sin(rollRad);
-
-    // Rodrigues rotation of r and u around f
-    Vec3 r2 = add( add(mul(r, c), mul(cross(f, r), s)), mul(f, dot(f,r)*(1.0f-c)) );
-    Vec3 u2 = add( add(mul(u, c), mul(cross(f, u), s)), mul(f, dot(f,u)*(1.0f-c)) );
-
-    // Write back basis (keep translation as-is)
-    m._11 = r2.x; m._12 = r2.y; m._13 = r2.z;
-    m._21 = u2.x; m._22 = u2.y; m._23 = u2.z;
-    m._31 = f.x;  m._32 = f.y;  m._33 = f.z;
-}
-
-// Compute yaw from forward vector projected to XZ plane
-static inline float YawFromForwardXZ(Vec3 f)
-{
-    // If your yaw feels reversed, swap signs here.
-    return std::atan2f(f.x, f.z);
-}
-
-static bool IsIdentity(const D3DMATRIX& m)
-{
-    const float* a = &m._11;
-    // strict is fine for your debug dump; if needed, use epsilon
-    return a[0]==1 && a[1]==0 && a[2]==0 && a[3]==0 &&
-           a[4]==0 && a[5]==1 && a[6]==0 && a[7]==0 &&
-           a[8]==0 && a[9]==0 && a[10]==1 && a[11]==0 &&
-           a[12]==0 && a[13]==0 && a[14]==0 && a[15]==1;
-}
-
-static inline float DWordToFloat(DWORD d)
-{
-    float f;
-    memcpy(&f, &d, sizeof(f));
-    return f;
-}
-
-// ------------------------
-// D3D9 Hooking
-// ------------------------
-using Direct3DCreate9_t = IDirect3D9* (WINAPI*)(UINT);
-static Direct3DCreate9_t g_origDirect3DCreate9 = nullptr;
-
-using CreateDevice_t = HRESULT (STDMETHODCALLTYPE*)(IDirect3D9* self, UINT, D3DDEVTYPE, HWND,
-                                                    DWORD, D3DPRESENT_PARAMETERS*, IDirect3DDevice9**);
-static CreateDevice_t g_origCreateDevice = nullptr;
-
-// Device vtable hook
-using SetTransform_t = HRESULT (STDMETHODCALLTYPE*)(IDirect3DDevice9* self, D3DTRANSFORMSTATETYPE, const D3DMATRIX*);
-static SetTransform_t g_origSetTransform = nullptr;
-
-static bool g_projAppliedThisFrame = false;
-
-using Present_t = HRESULT (STDMETHODCALLTYPE*)(
-    IDirect3DDevice9*, const RECT*, const RECT*, HWND, const RGNDATA*);
-
-static Present_t g_origPresent = nullptr;
-static IDirect3DSurface9* g_backbuffer = nullptr;
-
-
-static HRESULT STDMETHODCALLTYPE hkSetTransform(
-    IDirect3DDevice9* dev,
-    D3DTRANSFORMSTATETYPE state,
-    const D3DMATRIX* pMat)
-{
-    if (!pMat) return g_origSetTransform(dev, state, pMat);
-
-    if (state == D3DTS_PROJECTION)
+    // --- Engine time ONLY if stable ---
+    if (Sim_GetTime)
     {
-        IDirect3DSurface9* rt = nullptr;
-        if (SUCCEEDED(dev->GetRenderTarget(0, &rt)) && rt)
+        __try
         {
-            D3DSURFACE_DESC d{};
-            rt->GetDesc(&d);
+            float t = Sim_GetTime();
 
-            // Filter out shadow / small / depth targets
-            const bool isMainSceneRT =
-                d.Width  >= 800 &&
-                d.Height >= 600 &&
-                d.Format != D3DFMT_D16 &&
-                d.Format != D3DFMT_D24X8 &&
-                d.Format != D3DFMT_D24S8;
-
-            if (!isMainSceneRT)
-            {
-                rt->Release();
-                return g_origSetTransform(dev, state, pMat);
-            }
-
-            rt->Release();
+            // Reject loading / pre-world values
+            if (t > 0.1f && t < 1e7f)
+                return t;
         }
-
-        D3DMATRIX m = *pMat;
-
-        // HARD TEST (replace later with UG2 roll)
-        m._11 *= 0.2f;
-
-        return g_origSetTransform(dev, state, &m);
-    }
-
-    return g_origSetTransform(dev, state, pMat);
-}
-
-static HRESULT STDMETHODCALLTYPE hkPresent(
-    IDirect3DDevice9* dev,
-    const RECT* src,
-    const RECT* dst,
-    HWND wnd,
-    const RGNDATA* dirty)
-{
-    // new frame boundary
-    g_projAppliedThisFrame = false;
-
-    return g_origPresent(dev, src, dst, wnd, dirty);
-}
-
-using Reset_t = HRESULT (STDMETHODCALLTYPE*)(
-    IDirect3DDevice9*, D3DPRESENT_PARAMETERS*);
-
-static Reset_t g_origReset = nullptr;
-
-static HRESULT STDMETHODCALLTYPE hkReset(
-    IDirect3DDevice9* dev,
-    D3DPRESENT_PARAMETERS* params)
-{
-    // 🔥 Release dead backbuffer BEFORE reset
-    if (g_backbuffer)
-    {
-        g_backbuffer->Release();
-        g_backbuffer = nullptr;
-    }
-
-    HRESULT hr = g_origReset(dev, params);
-
-    // Re-acquire AFTER reset
-    if (SUCCEEDED(hr))
-    {
-        IDirect3DSurface9* bb = nullptr;
-        if (SUCCEEDED(dev->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &bb)) && bb)
+        __except (EXCEPTION_EXECUTE_HANDLER)
         {
-            g_backbuffer = bb;
-            g_backbuffer->AddRef();
-            bb->Release();
+            // ignore
         }
     }
 
-    return hr;
+    // --- QPC fallback ---
+    if (!qpcInit)
+    {
+        QueryPerformanceFrequency(&freq);
+        QueryPerformanceCounter(&t0);
+        qpcInit = true;
+        return 0.0f; // IMPORTANT
+    }
+
+    LARGE_INTEGER now{};
+    QueryPerformanceCounter(&now);
+
+    return float(double(now.QuadPart - t0.QuadPart) /
+        double(freq.QuadPart));
 }
 
-static void HookDevice(IDirect3DDevice9* dev)
+// ------------------------------------------------------------
+// INIT CAMERA STATE
+// ------------------------------------------------------------
+struct CameraState
 {
-    void** vtbl = *(void***)dev;
+    bool inited;
+    float lastT;
 
-    constexpr int IDX_SetTransform = 44; // stable
-    constexpr int IDX_Present      = 17; // stable
+    Vec3 prevFrom;
+    Vec3 prevF;
+    bool hasPrevF;
 
-    // Hook SetTransform once
-    if (!g_origSetTransform)
-    {
-        if (MH_CreateHook(vtbl[IDX_SetTransform], &hkSetTransform, (void**)&g_origSetTransform) == MH_OK)
-            MH_EnableHook(vtbl[IDX_SetTransform]);
-    }
+    Vec3 velDirFilt;
+    Vec3 prevVelDirFilt;
 
-    // Hook Present once
-    if (!g_origPresent)
-    {
-        if (MH_CreateHook(vtbl[IDX_Present], &hkPresent, (void**)&g_origPresent) == MH_OK)
-            MH_EnableHook(vtbl[IDX_Present]);
-    }
+    float speedFilt;
+    float yawRateFilt;
+
+    float yawBias;
+    float rollBias;
+
+    float gNorm;
+    float horizonLock;
+
+    // NEW (UG2)
+    Vec3 upVis;
+    Vec3 upVel;
+
+    Vec3 upBase;
+    bool hasUpBase;
     
-    constexpr int IDX_Reset = 16;
+    bool timeValid;
+} g_cam;
 
-    if (!g_origReset)
-    {
-        if (MH_CreateHook(vtbl[IDX_Reset], &hkReset, (void**)&g_origReset) == MH_OK)
-            MH_EnableHook(vtbl[IDX_Reset]);
-    }
+static void init_camera(Vec3* eye)
+{
+    g_cam.inited = true;
 
+    g_cam.prevFrom = *eye;
+
+    // Seed velocity direction safely (no impulses)
+    g_cam.velDirFilt     = v3(0.0f, 0.0f, 1.0f); // MW forward (XZ)
+    g_cam.prevVelDirFilt = g_cam.velDirFilt;
+
+    g_cam.speedFilt   = 0.0f;
+    g_cam.yawRateFilt = 0.0f;
+    g_cam.rollBias    = 0.0f;
+    g_cam.gNorm       = 0.0f;
+    g_cam.horizonLock = 1.0f;
+
+    // force dt resync next frame
+    g_cam.timeValid = false;
 }
 
-static HRESULT STDMETHODCALLTYPE hkCreateDevice(
-    IDirect3D9* self,
-    UINT Adapter,
-    D3DDEVTYPE DeviceType,
-    HWND hFocusWindow,
-    DWORD BehaviorFlags,
-    D3DPRESENT_PARAMETERS* pPresentationParameters,
-    IDirect3DDevice9** ppReturnedDeviceInterface)
+// ==========================================================
+// LOOK-AT HOOK
+// ==========================================================
+int __fastcall hkCubicUpdate(void* self, void*, float dt)
 {
-    HRESULT hr = g_origCreateDevice(
-        self,
-        Adapter,
-        DeviceType,
-        hFocusWindow,
-        BehaviorFlags,
-        pPresentationParameters,
-        ppReturnedDeviceInterface);
-
-    if (SUCCEEDED(hr) && ppReturnedDeviceInterface && *ppReturnedDeviceInterface)
-    {
-        IDirect3DDevice9* dev = *ppReturnedDeviceInterface;
-
-        HookDevice(dev);
-
-        if (!g_backbuffer)
-        {
-            IDirect3DSurface9* bb = nullptr;
-
-            if (!g_backbuffer)
-            {
-                IDirect3DSurface9* bb = nullptr;
-                if (SUCCEEDED(dev->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &bb)) && bb)
-                {
-                    g_backbuffer = bb;
-                    g_backbuffer->AddRef(); // 🔥 REQUIRED
-                    bb->Release();          // balance GetBackBuffer
-                }
-            }
-
-        }
-    }
-
-    return hr;
+    InterlockedExchange(&gApplyUG2Flag, 1);
+    return oCubicUpdate(self, dt);
 }
 
-static IDirect3D9* WINAPI hkDirect3DCreate9(UINT sdk)
+// MW look-at writes basis into COLUMNS:
+// col0 = right, col1 = up, col2 = back (D3D view convention)
+static void ApplyRollKeepPos(Mat4* V, float rollRad)
 {
-    IDirect3D9* d3d9 = g_origDirect3DCreate9(sdk);
-    if (!d3d9) return nullptr;
+    // basis is in COLUMNS
+    Vec3 R = v3(V->m[0][0], V->m[1][0], V->m[2][0]);
+    Vec3 U = v3(V->m[0][1], V->m[1][1], V->m[2][1]);
+    Vec3 B = v3(V->m[0][2], V->m[1][2], V->m[2][2]); // "back" (D3D view convention)
 
-    void** vtbl = *(void***)d3d9;
+    // translation is in ROW 3 (matches your Mat4 usage in MW code)
+    float Tx = V->m[3][0];
+    float Ty = V->m[3][1];
+    float Tz = V->m[3][2];
 
-    constexpr int IDX_CreateDevice = 16;
+    // Recover camera world position from view (orthonormal)
+    // camPos = -(Tx*R + Ty*U + Tz*B)
+    Vec3 camPos = add(add(mul(R, -Tx), mul(U, -Ty)), mul(B, -Tz));
 
-    if (!g_origCreateDevice)
-    {
-        if (MH_CreateHook(
-                vtbl[IDX_CreateDevice],
-                &hkCreateDevice,
-                (void**)&g_origCreateDevice) == MH_OK)
-        {
-            MH_EnableHook(vtbl[IDX_CreateDevice]);
-        }
-    }
+    // forward axis = -B
+    Vec3 F = norm(mul(B, -1.0f));
 
-    return d3d9;
+    // rotate R and U around F
+    Vec3 R2 = rotate(R, F, rollRad);
+    Vec3 U2 = rotate(U, F, rollRad);
+    Vec3 B2 = mul(norm(cross(R2, U2)), 1.0f); // this is FORWARD; we need BACK:
+
+    // write new basis columns
+    V->m[0][0] = R2.x; V->m[1][0] = R2.y; V->m[2][0] = R2.z;
+    V->m[0][1] = U2.x; V->m[1][1] = U2.y; V->m[2][1] = U2.z;
+    V->m[0][2] = B2.x; V->m[1][2] = B2.y; V->m[2][2] = B2.z;
+
+    // rebuild translation so camera stays at camPos
+    V->m[3][0] = -dot(R2, camPos);
+    V->m[3][1] = -dot(U2, camPos);
+    V->m[3][2] = -dot(B2, camPos);
 }
 
-static DWORD WINAPI InitThread(LPVOID)
+static float gPrevYaw = 0.0f;
+
+float ComputeYawDelta(const Mat4* V)
 {
-    // Wait until d3d9 is loaded
-    while (!GetModuleHandleA("d3d9.dll"))
-        Sleep(50);
+    // Forward = -B
+    Vec3 B = v3(V->m[0][2], V->m[1][2], V->m[2][2]);
+    Vec3 F = norm(mul(B, -1.0f));
 
-    HMODULE hD3D9 = GetModuleHandleA("d3d9.dll");
-    auto pCreate9 = (void*)GetProcAddress(hD3D9, "Direct3DCreate9");
-    if (!pCreate9) return 0;
+    float yaw = atan2f(F.x, F.z);
+    float dyaw = yaw - gPrevYaw;
+    gPrevYaw = yaw;
 
+    // unwrap
+    if (dyaw >  PI) dyaw -= 2.0f * PI;
+    if (dyaw < -PI) dyaw += 2.0f * PI;
+
+    return dyaw;
+}
+
+static float gCamRoll = 0.0f;
+static float gCamRollVel = 0.0f;
+
+void UpdateCameraRoll(float yawDelta, float speed, float dt)
+{
+    const float rollStrength = 2.2f;   // UG2-ish
+    const float rollMax      = 0.35f;  // ~20 degrees
+    const float stiffness    = 8.0f;   // response
+    const float damping      = 2.0f;
+
+    float targetRoll = clampf(yawDelta * speed * rollStrength,
+                             -rollMax, rollMax);
+
+    // critically damped spring
+    float accel = (targetRoll - gCamRoll) * stiffness
+                  - gCamRollVel * damping;
+
+    gCamRollVel += accel * dt;
+    gCamRoll    += gCamRollVel * dt;
+}
+
+void __cdecl hkCreateLookAtMatrix(Mat4* mat, Vec3* eye, Vec3* center, Vec3* up)
+{
+    // Let MW build the camera fully (director, blends, etc.)
+    oCreateLookAt(mat, eye, center, up);
+
+    if (InterlockedExchange(&gApplyUG2Flag, 0) == 0)
+        return;
+
+    if (!g_cam.inited)
+    {
+        init_camera(eye);
+        return;
+    }
+    // ------------------------------------------------------------
+    // TIME (safe)
+    // ------------------------------------------------------------
+    float t = GetTimeSeconds_Safe();
+
+    if (!g_cam.timeValid)
+    {
+        g_cam.lastT = t;
+        g_cam.timeValid = true;
+        g_cam.prevFrom = *eye;
+        return;
+    }
+
+    float rawDt = t - g_cam.lastT;
+    g_cam.lastT = t;
+
+    if (rawDt <= 0.0f || rawDt > 0.5f)
+        return;
+
+    float dt = clampf(rawDt, 1.0f / 240.0f, 1.0f / 30.0f);
+
+    // ------------------------------------------------------------
+    // 1) CAMERA-DERIVED VELOCITY (MW: Y-up → XZ plane)
+    // ------------------------------------------------------------
+    Vec3 fromNow = *eye;
+    Vec3 vel = sub(fromNow, g_cam.prevFrom);
+    g_cam.prevFrom = fromNow;
+
+    float speed = len(vel) / dt; // world units / sec
+
+    Vec3 vdir = vel;
+    vdir.y = 0.0f; // MW ground plane
+
+    float vdirLen = len(vdir);
+
+    float velResp = 1.0f - expf(-6.0f * dt);
+
+    if (vdirLen > 1e-3f && speed > 1e-2f)
+    {
+        vdir = mul(vdir, 1.0f / vdirLen);
+
+        // filter direction
+        g_cam.velDirFilt = norm(add(
+            mul(g_cam.velDirFilt, 1.0f - velResp),
+            mul(vdir, velResp)));
+
+        // filter speed
+        g_cam.speedFilt += (speed - g_cam.speedFilt) * velResp;
+
+        // --------------------------------------------------------
+        // 2) YAW RATE FROM VELOCITY DIRECTION (MW axes!)
+        // --------------------------------------------------------
+        Vec3 prevF = g_cam.prevVelDirFilt;
+        Vec3 curF  = g_cam.velDirFilt;
+
+        if (len(prevF) < 0.5f)
+            prevF = curF;
+
+        // Y-up cross (XZ plane)
+        float yawS = (prevF.x * curF.z - prevF.z * curF.x);
+        float yawRateRaw = yawS / dt;
+
+        g_cam.prevVelDirFilt = curF;
+
+        float yawResp = 1.0f - expf(-8.0f * dt);
+        g_cam.yawRateFilt += (yawRateRaw - g_cam.yawRateFilt) * yawResp;
+    }
+    else
+    {
+        // decay when stopped
+        g_cam.yawRateFilt += (0.0f - g_cam.yawRateFilt) * velResp;
+        g_cam.speedFilt   += (0.0f - g_cam.speedFilt)   * velResp;
+    }
+
+    // ------------------------------------------------------------
+    // 3) UG2-STYLE ROLL INTENT
+    // ------------------------------------------------------------
+    float yawAbs  = fabsf(g_cam.yawRateFilt);
+    float yaw01  = saturate(yawAbs / 0.15f);
+    float speed01 = saturate(g_cam.speedFilt / 45.0f);
+
+    // UG2/MW hybrid
+    float rollTarget =
+        signf(-g_cam.yawRateFilt) *
+        yaw01 *
+        speed01 *
+        DEG2RAD(14.0f);   // MW camera roll amplitude
+
+    g_cam.rollBias += (rollTarget - g_cam.rollBias) *
+                      (1.0f - expf(-6.0f * dt));
+
+
+    // ------------------------------------------------------------
+    // 4) APPLY ROLL (KEEP POSITION)
+    // ------------------------------------------------------------
+    ApplyRollKeepPos(mat, g_cam.rollBias);
+}
+
+// ==========================================================
+// INSTALL
+// ==========================================================
+
+static bool InstallHooks()
+{
     MH_Initialize();
-    MH_CreateHook(pCreate9, &hkDirect3DCreate9, (void**)&g_origDirect3DCreate9);
-    MH_EnableHook(pCreate9);
 
-    return 0;
+    MH_CreateHook(
+        (LPVOID)Game::DisableTiltsAddr,
+        hkCubicUpdate,
+        (LPVOID*)&oCubicUpdate
+    );
+
+    MH_CreateHook(
+        (LPVOID)Game::CreateLookAtAddr,
+        hkCreateLookAtMatrix,
+        (LPVOID*)&oCreateLookAt
+    );
+
+    MH_EnableHook(MH_ALL_HOOKS);
+    
+    return true;
 }
 
+// ==========================================================
+// DLL ENTRY
+// ==========================================================
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID)
 {
     if (reason == DLL_PROCESS_ATTACH)
     {
         DisableThreadLibraryCalls(hModule);
-        CreateThread(nullptr, 0, InitThread, nullptr, 0, nullptr);
+
+        uintptr_t base = (uintptr_t)GetModuleHandleA(NULL);
+        auto* dos = (IMAGE_DOS_HEADER*)base;
+        auto* nt = (IMAGE_NT_HEADERS*)(base + dos->e_lfanew);
+
+        if ((base + nt->OptionalHeader.AddressOfEntryPoint + (0x400000 - base)) == Game::Entry)
+        {
+            InstallHooks();
+        }
+        else
+        {
+            MessageBoxA(NULL, Game::Error, Game::Name, MB_ICONERROR);
+            return FALSE;
+        }
     }
     return TRUE;
 }
