@@ -6,7 +6,7 @@
 - UG2 style camera for MW & CB
 - Cinematic camera for CB
 
-![alt text](related.jpg)
+![alt text](related_mw.jpg) ![alt text](related_cb.jpg)
 
 ## Some details about how camera works in MW & CB 
 

@@ -6,23 +6,13 @@
     <!-- ====================================================== -->
     <ItemGroup Label="ProjectConfigurations">
 
-        <ProjectConfiguration Include="Debug_MW|Win32">
-            <Configuration>Debug_MW</Configuration>
+        <ProjectConfiguration Include="Debug|Win32">
+            <Configuration>Debug</Configuration>
             <Platform>Win32</Platform>
         </ProjectConfiguration>
 
-        <ProjectConfiguration Include="Release_MW|Win32">
-            <Configuration>Release_MW</Configuration>
-            <Platform>Win32</Platform>
-        </ProjectConfiguration>
-
-        <ProjectConfiguration Include="Debug_CB|Win32">
-            <Configuration>Debug_CB</Configuration>
-            <Platform>Win32</Platform>
-        </ProjectConfiguration>
-
-        <ProjectConfiguration Include="Release_CB|Win32">
-            <Configuration>Release_CB</Configuration>
+        <ProjectConfiguration Include="Release|Win32">
+            <Configuration>Release</Configuration>
             <Platform>Win32</Platform>
         </ProjectConfiguration>
 
@@ -48,27 +38,25 @@
     <!-- ====================================================== -->
     <!-- COMMON OUTPUT -->
     <!-- ====================================================== -->
-    <PropertyGroup Condition="'$(Configuration)'=='Debug_MW' Or '$(Configuration)'=='Release_MW'">
-        <TargetName>NFSMW.CameraMod</TargetName>
-    </PropertyGroup>
-
-    <PropertyGroup Condition="'$(Configuration)'=='Debug_CB' Or '$(Configuration)'=='Release_CB'">
-        <TargetName>NFSC.CameraMod</TargetName>
-    </PropertyGroup>
-
     <PropertyGroup>
         <TargetExt>.asi</TargetExt>
         <OutDir>$(SolutionDir)scripts\</OutDir>
     </PropertyGroup>
 
-    <!-- ====================================================== -->
-    <!-- POST BUILD -->
-    <!-- ====================================================== -->
-    <ItemDefinitionGroup>
+    <PropertyGroup Condition="'$(Configuration)'=='Debug' Or '$(Configuration)'=='Release'">
+        <TargetName>NFS.CameraMod</TargetName>
+    </PropertyGroup>
+
+    <ItemDefinitionGroup Condition="'$(Configuration)'=='Debug' Or '$(Configuration)'=='Release'">
         <PostBuildEvent>
             <Command>
-                XCOPY /Y /R "$(TargetPath)" "d:\Games\NFS MW - Vanilla\SCRIPTS\"
-<!--                XCOPY /Y /R "$(TargetPath)" "d:\Games\NFSC Redux\Scripts\"-->
+                <!--                XCOPY /Y /R "$(SolutionDir)NFS.CameraMod.ini" "$(OutDir)" &amp;-->
+                
+<!--                XCOPY /Y /R "$(SolutionDir)NFS.CameraMod.ini" "d:\Games\NFS MW - Beta Content Mod\scripts\" &amp;-->
+<!--                XCOPY /Y /R "$(TargetPath)" "d:\Games\NFS MW - Beta Content Mod\scripts\"-->
+
+                XCOPY /Y /R "$(SolutionDir)NFS.CameraMod.ini" "d:\Games\NFSC Redux\scripts\" &amp;
+                XCOPY /Y /R "$(TargetPath)" "d:\Games\NFSC Redux\Scripts\"
             </Command>
         </PostBuildEvent>
     </ItemDefinitionGroup>
@@ -76,20 +64,11 @@
     <!-- ====================================================== -->
     <!-- CONFIGURATION FLAGS -->
     <!-- ====================================================== -->
-    <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug_MW|Win32'">
+    <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
         <UseDebugLibraries>true</UseDebugLibraries>
     </PropertyGroup>
 
-    <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release_MW|Win32'">
-        <UseDebugLibraries>false</UseDebugLibraries>
-        <WholeProgramOptimization>true</WholeProgramOptimization>
-    </PropertyGroup>
-
-    <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug_CB|Win32'">
-        <UseDebugLibraries>true</UseDebugLibraries>
-    </PropertyGroup>
-
-    <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release_CB|Win32'">
+    <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
         <UseDebugLibraries>false</UseDebugLibraries>
         <WholeProgramOptimization>true</WholeProgramOptimization>
     </PropertyGroup>
@@ -97,19 +76,11 @@
     <!-- ====================================================== -->
     <!-- PROPERTY SHEETS -->
     <!-- ====================================================== -->
-    <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Debug_MW|Win32'" Label="PropertySheets">
+    <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="PropertySheets">
         <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform"/>
     </ImportGroup>
 
-    <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Release_MW|Win32'" Label="PropertySheets">
-        <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform"/>
-    </ImportGroup>
-
-    <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug_CB|Win32'">
-        <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform"/>
-    </ImportGroup>
-
-    <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release_CB|Win32'">
+    <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="PropertySheets">
         <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform"/>
     </ImportGroup>
 
@@ -148,13 +119,13 @@
     <!-- ====================================================== -->
     <!-- MW CONFIG -->
     <!-- ====================================================== -->
-    <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug_MW|Win32'">
+    <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
         <ClCompile>
             <PrecompiledHeader>NotUsing</PrecompiledHeader>
             <WarningLevel>Level3</WarningLevel>
             <Optimization>Disabled</Optimization>
             <PreprocessorDefinitions>
-                GAME_MW;_DEBUG;_WINDOWS;_USRDLL;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)
+                _DEBUG;_WINDOWS;_USRDLL;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)
             </PreprocessorDefinitions>
         </ClCompile>
         <Link>
@@ -162,41 +133,13 @@
         </Link>
     </ItemDefinitionGroup>
 
-    <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release_MW|Win32'">
+    <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
         <ClCompile>
             <PrecompiledHeader>NotUsing</PrecompiledHeader>
             <WarningLevel>Level4</WarningLevel>
             <Optimization>MaxSpeed</Optimization>
             <PreprocessorDefinitions>
-                GAME_MW;NDEBUG;_WINDOWS;_USRDLL;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)
-            </PreprocessorDefinitions>
-        </ClCompile>
-    </ItemDefinitionGroup>
-
-    <!-- ====================================================== -->
-    <!-- CB CONFIG -->
-    <!-- ====================================================== -->
-    <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug_CB|Win32'">
-        <ClCompile>
-            <PrecompiledHeader>NotUsing</PrecompiledHeader>
-            <WarningLevel>Level3</WarningLevel>
-            <Optimization>Disabled</Optimization>
-            <PreprocessorDefinitions>
-                GAME_CB;_DEBUG;_WINDOWS;_USRDLL;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)
-            </PreprocessorDefinitions>
-        </ClCompile>
-        <Link>
-            <GenerateDebugInformation>true</GenerateDebugInformation>
-        </Link>
-    </ItemDefinitionGroup>
-
-    <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release_CB|Win32'">
-        <ClCompile>
-            <PrecompiledHeader>NotUsing</PrecompiledHeader>
-            <WarningLevel>Level4</WarningLevel>
-            <Optimization>MaxSpeed</Optimization>
-            <PreprocessorDefinitions>
-                GAME_CB;NDEBUG;_WINDOWS;_USRDLL;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)
+                NDEBUG;_WINDOWS;_USRDLL;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)
             </PreprocessorDefinitions>
         </ClCompile>
     </ItemDefinitionGroup>
@@ -213,14 +156,16 @@
         <ClInclude Include="..\includes\minhook\src\hde\table32.h"/>
         <ClInclude Include="..\includes\minhook\src\hde\table64.h"/>
         <ClInclude Include="..\includes\minhook\src\trampoline.h"/>
-        <ClInclude Include="Carbon.h"/>
         <ClInclude Include="Log.h"/>
         <ClInclude Include="Math.h" />
         <ClInclude Include="MostWanted.h"/>
+        <ClInclude Include="Carbon.h"/>
         <ClInclude Include="Game.h"/>
+        <ClInclude Include="CameraManager.h" />
         <ClInclude Include="CarbonCameraManager.h" />
         <ClInclude Include="MWCameraManager.h" />
         <ClInclude Include="TimeManager.h" />
+        <ClInclude Include="ConfigurationManager.h" />
     </ItemGroup>
 
     <ItemGroup>
@@ -229,6 +174,9 @@
         <ClCompile Include="..\includes\minhook\src\hde\hde64.c"/>
         <ClCompile Include="..\includes\minhook\src\hook.c"/>
         <ClCompile Include="..\includes\minhook\src\trampoline.c"/>
+        <ClCompile Include="CameraManager.cpp"/>
+        <ClCompile Include="CarbonCameraManager.cpp"/>
+        <ClCompile Include="MWCameraManager.cpp"/>
         <ClCompile Include="dllmain.cpp"/>
     </ItemGroup>
 

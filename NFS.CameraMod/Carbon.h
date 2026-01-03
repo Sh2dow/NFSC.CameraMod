@@ -2,7 +2,7 @@
 
 #include <cstdint>   // REQUIRED for uintptr_t
 
-namespace Game
+namespace Carbon
 {
 	// ------------------------------------------------------------
 	// Executable validation
@@ -40,6 +40,7 @@ namespace Game
 	// ------------------------------------------------------------
 	// Camera internals (v1.4 EN)
 	// ------------------------------------------------------------
+	constexpr uintptr_t NFS_D3D9_DEVICE_ADDRESS = 0x00AB0ABC;
 	constexpr uintptr_t CameraWrapperAddr = 0x00492D80;   // your wrapper start
 	constexpr uintptr_t CreateLookAtAddr  = 0x0071B430;
 	constexpr uintptr_t DisableTiltsAddr  = 0x00492353;

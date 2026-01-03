@@ -2,7 +2,7 @@
 
 #include <cstdint>   // REQUIRED for uintptr_t
 
-namespace Game
+namespace MW
 {
 	// ------------------------------------------------------------
 	// Executable validation

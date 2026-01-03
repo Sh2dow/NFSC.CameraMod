@@ -7,7 +7,6 @@
 // TIME
 // ==========================================================
 using Sim_GetTime_t = float(__cdecl*)();
-static Sim_GetTime_t Sim_GetTime = (Sim_GetTime_t)Game::SimGetTimeAddr; // verify in IDA
 
 static float GetTimeSeconds_Safe()
 {
@@ -16,11 +15,12 @@ static float GetTimeSeconds_Safe()
     static LARGE_INTEGER t0{};
 
     // --- Engine time ONLY if stable ---
-    if (Sim_GetTime)
+    Sim_GetTime_t simGetTime = (Sim_GetTime_t)Game::SimGetTimeAddr; // verify in IDA
+    if (simGetTime)
     {
         __try
         {
-            float t = Sim_GetTime();
+            float t = simGetTime();
 
             // Reject loading / pre-world values
             if (t > 0.1f && t < 1e7f)

@@ -1,10 +1,11 @@
-#include "Log.h"
-
+#pragma once
 // ==========================================================
 // MATH
 // ==========================================================
 #ifndef DEG2RAD
 #define DEG2RAD(x) ((x) * 0.01745329251994329577f)
+#include <cmath>
+#include <float.h>
 #endif
 
 struct Mat4
@@ -26,6 +27,10 @@ static inline Vec3 neg(Vec3 a){ return {-a.x,-a.y,-a.z}; }
 static inline float dot(Vec3 a, Vec3 b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
 static inline bool is_finite(float f) { return std::isfinite(f) != 0; }
 static inline float absf(float x) { return x < 0 ? -x : x; }
+static inline Vec3 lerp(const Vec3& a, const Vec3& b, float t)
+{
+    return add(a, mul(sub(b, a), t));
+}
 
 // Wrap angle to [-pi, pi]
 static inline float WrapPi(float a)
