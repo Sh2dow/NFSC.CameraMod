@@ -156,7 +156,6 @@
         <ClInclude Include="..\includes\minhook\src\hde\table32.h"/>
         <ClInclude Include="..\includes\minhook\src\hde\table64.h"/>
         <ClInclude Include="..\includes\minhook\src\trampoline.h"/>
-        <ClInclude Include="Log.h"/>
         <ClInclude Include="Math.h" />
         <ClInclude Include="MostWanted.h"/>
         <ClInclude Include="Carbon.h"/>

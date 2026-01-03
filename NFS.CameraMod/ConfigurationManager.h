@@ -1,5 +1,5 @@
 #pragma once
-#include "Log.h"
+#include "minhook/include/MinHook.h"
 
 struct CamRollConfig
 {

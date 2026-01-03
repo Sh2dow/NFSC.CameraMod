@@ -1,7 +1,5 @@
 #include <windows.h>
 #include "Game.h"
-#include "Log.h"
-#include "MostWanted.h"
 #include "MWCameraManager.h"
 #include "CarbonCameraManager.h"
 // ==========================================================
@@ -46,11 +44,7 @@ DWORD WINAPI MainThread(void*)
     if (detected_game != GameType::MW && detected_game != GameType::CB)
         Game::Init(detected_game);
 
-    if (hooksInstalled)
-    {
-        asi_log::Log("[CameraMod] Hooks installed.\n");
-    }
-    else
+    if (!hooksInstalled)
     {
         MessageBoxA(NULL, Game::Error, Game::Name, MB_ICONERROR);
         return FALSE;
