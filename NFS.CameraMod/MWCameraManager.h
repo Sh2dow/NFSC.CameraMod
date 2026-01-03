@@ -308,29 +308,41 @@ void __cdecl hkCreateLookAtMatrix(Mat4* mat, Vec3* eye, Vec3* center, Vec3* up)
     // ROLL INTENT (UG2 STYLE — CAMERA HEADING BASED)
     // ------------------------------------------------------------
     float yawRate = g_cam.yawRateFilt;
-    if (fabsf(yawRate) < 0.005f) yawRate = 0.0f;
+    if (fabsf(yawRate) < 0.005f)
+        yawRate = 0.0f;
 
-    // scale lateral load proxy
-    float latG = fabsf(yawRate) * g_cam.speedFilt * 0.14f;   // was 0.06f
+    // UG2 lateral load proxy
+    // (UG2 uses vehicle yaw * speed; camera version needs scaling)
+    float latG = fabsf(yawRate) * g_cam.speedFilt * 0.16f;
 
-    float g01 = saturate((latG - 1.2f) / (6.0f - 1.2f));     // was 3.5..10.0
-    g01 = g01 * g01 * (3.0f - 2.0f * g01);
+    // UG2 knee: roll starts late, ramps hard
+    float g01 = saturate((latG - 1.0f) / (5.5f - 1.0f));
+    g01 = g01 * g01 * (3.0f - 2.0f * g01);   // smoothstep
 
-    float rollTarget = signf(-yawRate) * g01 * DEG2RAD(7.5f); // was 6.5°
+    // UG2 max roll ≈ 8 degrees
+    float rollTarget =
+        signf(-yawRate) *
+        g01 *
+        DEG2RAD(8.0f);
 
-    // filter
-    float cmdResp = 1.0f - expf(-8.0f * dt);
+    // ------------------------------------------------------------
+    // UG2 RESPONSE
+    // ------------------------------------------------------------
+
+    // target filter (UG2 has noticeable lag)
+    float cmdResp = 1.0f - expf(-6.0f * dt);
     g_cam.rollTargetFilt += (rollTarget - g_cam.rollTargetFilt) * cmdResp;
     rollTarget = g_cam.rollTargetFilt;
 
-    // rate limit
-    float maxStep = DEG2RAD(55.0f) * dt;
+    // rate limit (UG2 is NOT instant)
+    float maxStep = DEG2RAD(45.0f) * dt;
     float diff = clampf(rollTarget - g_cam.rollBias, -maxStep, +maxStep);
     rollTarget = g_cam.rollBias + diff;
 
-    // bias smoothing
-    float k = (fabsf(rollTarget) > fabsf(g_cam.rollBias)) ? 9.0f : 6.0f;
-    g_cam.rollBias += (rollTarget - g_cam.rollBias) * (1.0f - expf(-k * dt));
+    // asymmetric damping (snap back faster)
+    float k = (fabsf(rollTarget) > fabsf(g_cam.rollBias)) ? 7.0f : 11.0f;
+    g_cam.rollBias += (rollTarget - g_cam.rollBias) *
+                      (1.0f - expf(-k * dt));
 
     // ------------------------------------------------------------
     // HORIZON LOCK (USE SAME YAW SOURCE)
